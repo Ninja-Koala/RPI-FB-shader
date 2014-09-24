@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <sys/ioctl.h>
 
 #include <linux/fb.h>
 #include <sys/mman.h>
@@ -20,6 +21,8 @@ float shader_time=0;
 //int refresh_delayed=0;
 unsigned char *framebuffer;
 unsigned char *fb0;
+int screen_size, screen_size2;
+int xres, yres;
 
 typedef struct
 {
@@ -174,18 +177,34 @@ static void init_ogl(CUBE_STATE_T *state)
    dispman_display = vc_dispmanx_display_open( 0 /* LCD */);
    dispman_update = vc_dispmanx_update_start( 0 );
 
-   screen_resource = vc_dispmanx_resource_create(VC_IMAGE_RGB565, state->screen_width, state->screen_height, &image_prt);
-   framebuffer=malloc(state->screen_width*state->screen_height*2);
 
-   //memset(framebuffer,0xff, state->screen_width*state->screen_height);
+   fbfd=open("/dev/fb0",O_RDWR);
 
-   //fbfd=open("/dev/fb0",O_RDWR);
-   //fb0=mmap(0,state->screen_width*state->screen_height*2, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
-   //memcpy(framebuffer,fb0, state->screen_width*state->screen_height*2);
+   struct fb_var_screeninfo vinfo;
+   ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo);
+   struct fb_fix_screeninfo finfo;
+   ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo);
+
+   xres=vinfo.xres; 
+   yres=vinfo.yres; 
+   screen_size = finfo.smem_len;
+
+   printf("%d",screen_size);
+
+   //screen_size2 = state->screen_width*state->screen_height*2;
+
+   framebuffer=malloc(screen_size);
+
+
+   fb0=(unsigned char*)mmap(0,screen_size, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
+   memcpy(framebuffer,fb0, screen_size);
+   //memset(framebuffer,0xFF, screen_size);
+   //memset(fb0,0xFF, screen_size);
    //framebuffer=fb0;
    
    //memset(framebuffer,0xff, state->screen_width*state->screen_height);
 
+   //screen_resource = vc_dispmanx_resource_create(VC_IMAGE_RGB565, state->screen_width, state->screen_height, &image_prt);
    //vc_dispmanx_snapshot(dispman_display, screen_resource, 0);
    //vc_dispmanx_resource_read_data(screen_resource, &dst_rect, framebuffer, state->screen_width*2); 
          
@@ -307,7 +326,7 @@ static void init_shaders(CUBE_STATE_T *state, const GLchar *fshader_source)
 	glGenTextures(1,&state->tex);
 	glBindTexture(GL_TEXTURE_2D,state->tex);
 
-	glTexImage2D(GL_TEXTURE_2D,0,GL_RGB,state->screen_width,state->screen_height,0,GL_RGB,GL_UNSIGNED_SHORT_5_6_5,framebuffer);
+	glTexImage2D(GL_TEXTURE_2D,0,GL_RGB, xres, yres, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, framebuffer);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -329,11 +348,11 @@ static void init_shaders(CUBE_STATE_T *state, const GLchar *fshader_source)
 static void draw_triangles(CUBE_STATE_T *state, GLfloat width, GLfloat height, int refresh)
 {
         // Now render to the main frame buffer
-        //glBindFramebuffer(GL_FRAMEBUFFER,0);
+        glBindFramebuffer(GL_FRAMEBUFFER,0);
         // Clear the background (not really necessary I suppose)
-        //glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 	if(refresh){
-		//glTexSubImage2D(GL_TEXTURE_2D,0,0,0,state->screen_width,state->screen_height,GL_RGB,GL_UNSIGNED_SHORT_5_6_5,framebuffer);
+		glTexSubImage2D(GL_TEXTURE_2D,0,0,0,xres,yres,GL_RGB,GL_UNSIGNED_SHORT_5_6_5,framebuffer);
 	}
         check();
 
@@ -370,7 +389,7 @@ static void draw_triangles(CUBE_STATE_T *state, GLfloat width, GLfloat height, i
 
 int main (int argc, char * argv[])
 {
-   int terminate = 0, refresh=0;
+   int terminate = 0, refresh=1;
    GLfloat width, height;
    bcm_host_init();
 
@@ -406,16 +425,17 @@ int main (int argc, char * argv[])
       gettimeofday(&curr_time, NULL);
       timeval_subtract(&interval, &curr_time, &start_time);
       shader_time=interval.tv_sec+interval.tv_usec/1000000.;
-
+      /*
       timeval_subtract(&time_since_refresh, &curr_time, &last_refresh);
       if(time_since_refresh.tv_usec>125000){
-   	  //memcpy(framebuffer,fb0, state->screen_width*state->screen_height*2);
-          //refresh=1;
+   	  //memcpy(framebuffer,fb0, screen_size);
+          refresh=1;
           last_refresh=curr_time;
       }
-
+      */
+      memcpy(framebuffer,fb0, screen_size);
       draw_triangles(state, width, height, refresh);
-      refresh=0;
+      //refresh=0;
    }
    return 0;
 }
